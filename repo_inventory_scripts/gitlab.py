@@ -295,13 +295,30 @@ if not tokens:
     )
     sys.exit(1)
 
+def _sanitize_group_for_filename(group: str) -> str:
+    """Turn 'parent/child' or a numeric ID into a safe filename stem."""
+    s = str(group).strip().strip("/")
+    # Replace path separators and any other unsafe chars with '-'.
+    safe = "".join(
+        c if (c.isalnum() or c in ("-", "_", ".")) else "-"
+        for c in s.replace("/", "-").replace("\\", "-")
+    )
+    # Collapse runs of '-' and trim.
+    while "--" in safe:
+        safe = safe.replace("--", "-")
+    safe = safe.strip("-._") or "gitlab-stats"
+    return safe
+
+
+_group_stem = _sanitize_group_for_filename(GROUP_NAME)
+
 OUTPUT_FILE = (
-    Path(_args.output) if _args.output else data_dir / "gitlab-stats.csv"
+    Path(_args.output) if _args.output else data_dir / f"{_group_stem}.csv"
 )
 CHECKPOINT_FILE = (
     Path(_args.checkpoint)
     if _args.checkpoint
-    else data_dir / ".processed_projects"
+    else data_dir / f".processed_projects_{_group_stem}"
 )
 
 log(f"GitLab instance: {GITLAB_URL}")

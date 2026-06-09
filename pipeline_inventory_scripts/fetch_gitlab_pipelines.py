@@ -91,6 +91,22 @@ DEFAULT_GITLAB_URL = "https://gitlab.com"
 DEFAULT_CI_FILE = ".gitlab-ci.yml"
 TEMPLATE_DIRS = ("templates", "ci-templates", "ci")
 YAML_EXTS = (".yml", ".yaml")
+DEFAULT_OUTPUT_DIR = Path("./output")
+
+
+def _sanitize_group_for_filename(group: str | int | None) -> str:
+    """Turn 'parent/child' or a numeric ID into a safe filename stem."""
+    if group is None or str(group).strip() == "":
+        return "pipelines"
+    s = str(group).strip().strip("/")
+    safe = "".join(
+        c if (c.isalnum() or c in ("-", "_", ".")) else "-"
+        for c in s.replace("/", "-").replace("\\", "-")
+    )
+    while "--" in safe:
+        safe = safe.replace("--", "-")
+    safe = safe.strip("-._")
+    return safe or "pipelines"
 
 CSV_FIELDS = [
     "type",            # pipeline_run | ci_config | reusable_template
@@ -540,13 +556,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     out = p.add_argument_group("output / resume")
     out.add_argument(
         "--output",
-        default="./output/pipelines.csv",
-        help="Output CSV path (default ./output/pipelines.csv).",
+        default=None,
+        help=(
+            "Output CSV path "
+            "(default ./output/<group>.csv, derived from --group or "
+            "the root group in --projects-csv)."
+        ),
     )
     out.add_argument(
         "--checkpoint",
-        default="./output/.processed_pipelines",
-        help="Resume file of completed project IDs.",
+        default=None,
+        help=(
+            "Resume file of completed project IDs "
+            "(default ./output/.processed_pipelines_<group>)."
+        ),
     )
     out.add_argument(
         "--no-resume",
@@ -691,6 +714,23 @@ def main(argv: list[str] | None = None) -> int:
     if not projects:
         print("[info] Nothing to do.")
         return 0
+
+    # --- resolve default output / checkpoint paths from the group ---------
+    if args.group:
+        group_stem = _sanitize_group_for_filename(args.group)
+    elif root_path:
+        group_stem = _sanitize_group_for_filename(root_path)
+    else:
+        group_stem = "pipelines"
+
+    if args.output is None:
+        args.output = str(DEFAULT_OUTPUT_DIR / f"{group_stem}.csv")
+    if args.checkpoint is None:
+        args.checkpoint = str(
+            DEFAULT_OUTPUT_DIR / f".processed_pipelines_{group_stem}"
+        )
+    print(f"[info] Output: {args.output}")
+    print(f"[info] Checkpoint: {args.checkpoint}")
 
     # --- checkpoint / resume ------------------------------------------------
     checkpoint: CheckpointStore | None = None
