@@ -1,133 +1,228 @@
-# GitLab Project Inventory Script
+# Repository Inventory (`gitlab.py`)
 
-This standalone script fetches comprehensive statistics for all projects in a GitLab group, including repositories in subgroups.
+Per-project inventory for every project under a GitLab group (recursing
+through all nested subgroups). Writes one row per project to
+`data/gitlab-stats.csv`.
 
-## Features
+Parallel, multi-token, rate-limit-aware, resume-safe.
 
-- Fetches detailed project statistics from GitLab API
-- Supports filtering projects based on a CSV file
-- Exports data to CSV format for analysis
-- Tracks repository size, commits, branches, files, and more
-- Identifies large files and repositories exceeding size limits
-- Detects CI/CD pipeline configurations
-- Counts exportable models for migration planning
+## Install
 
-## Requirements
+Install the shared dependencies once from the workspace root:
 
-- Python 3.7 or higher
-- Required Python package: `requests`
-
-## Quick Start
-
-
-###  Set Environment Variables
-
-**For PowerShell (Windows):**
 ```powershell
-$env:GITLAB_TOKEN="your_gitlab_token_here"
-$env:GITLAB_GROUP="your_group_name"
-$env:GITLAB_URL="https://gitlab.com"  # Optional, defaults to gitlab.com
+pip install -r ..\requirements.txt
 ```
 
-**For Git Bash / Linux / macOS:**
-```bash
-export GITLAB_TOKEN="your_gitlab_token_here"
-export GITLAB_GROUP="your_group_name"
-export GITLAB_URL="https://gitlab.com"  # Optional, defaults to gitlab.com
-```
+Python 3.10+.
 
-### 3. Run the Script
+## Quick start
 
-```bash
+The recommended way is a `.env` file at the workspace root (copy
+`../.env-example` and fill in your values). Both scripts auto-load it.
+
+```powershell
+# 1. From the workspace root:
+Copy-Item ..\.env-example ..\.env
+notepad ..\.env       # set GITLAB_TOKEN and GITLAB_GROUP
+
+# 2. Then just:
 python gitlab.py
 ```
 
-The script will automatically:
-1. Read credentials from environment variables
-2. Fetch all projects from the specified GitLab group (including subgroups)
-3. Collect detailed statistics for each project
-4. Export results to `data/gitlab-stats.csv`
+Shell environment variables still work and override anything in `.env`:
 
-## Getting a GitLab Access Token
+```powershell
+# Single token, no .env
+$env:GITLAB_TOKEN = "glpat-xxxxxxxxxxxx"
+$env:GITLAB_GROUP = "your-group"
+python gitlab.py
 
-1. Log in to your GitLab instance
-2. Go to **User Settings** → **Access Tokens**
-3. Create a new token with the following scopes:
-   - `read_api`
-   - `read_repository`
-4. Copy the token and set it as the `GITLAB_TOKEN` environment variable
+# Multiple tokens (round-robin pool; each PAT should belong to a different
+# user for real Nx throughput — see top-level README)
+$env:GITLAB_TOKENS = "glpat-a,glpat-b,glpat-c"
+python gitlab.py --workers-per-token 4
+
+# Faster mode (skips per-branch commit/file walks)
+python gitlab.py --no-branch-walk
+
+# Self-managed GitLab
+$env:GITLAB_URL = "https://gitlab.example.com"
+python gitlab.py
+```
 
 ## Output
 
-The script generates a CSV file (`data/gitlab-stats.csv`) with the following information for each project:
+`data/gitlab-stats.csv`, one row per project. Columns:
 
-- Project ID, name, and path
-- Group hierarchy (top_level, subgroup_1, subgroup_2, etc.)
-- Status (active/archived)
-- Stars, forks, open issues
-- Contributor count
-- Commit count (across all branches)
-- Branch count
-- File count (default branch and all branches)
-- Repository size (MB and GB)
-- Large file detection (>100MB)
-- Size threshold flags (>2GB, >6GB)
-- CI/CD pipeline detection
-- Exportable model counts (for migration planning):
-  - Users, protected branches, merge requests, issues, webhooks, tags, milestones, wikis
+| Group | Columns |
+|---|---|
+| Identity | `id`, `name`, `parent_group`, `subgroups`, `subgroup_count`, `path`, `visibility`, `created_at`, `default_branch`, `web_url` |
+| Activity | `status`, `archived`, `stars`, `forks`, `open_issues`, `last_activity`, `contributors`, `pr_count`, `total_commits` |
+| Repo size | `branch_count`, `file_count`, `all_branches_file_count`, `total_objects`, `repository_size_mb`, `repository_size_gb`, `total_size_mb`, `total_size_gb` |
+| Size flags | `has_large_file_100mb`, `exceeds_2gb`, `exceeds_6gb` |
+| Features | `pipeline`, `has_lfs`, `lfs_file_count`, `lfs_total_size_bytes`, `lfs_total_size_mb`, `has_gitmodules`, `has_codeowners`, `has_pr_template`, `releases_count`, `branch_protections`, `has_rulesets`, `ruleset_count` |
+| Migration counts | `exportable_users`, `exportable_protected_branches`, `exportable_merge_requests`, `exportable_mr_notes`, `exportable_issues`, `exportable_issue_notes`, `exportable_webhooks`, `exportable_tags`, `exportable_commit_comments`, `exportable_has_wiki`, `exportable_milestones` |
 
-## Project Filtering
+> **Row order**: rows are written in the order projects *finish*, not the
+> order they were listed. Sort by `id` or `path` if you need a stable
+> order.
 
-To process only specific projects:
+## All CLI flags
 
-1. Set `project_list_file` in your configuration:
-```ini
-project_list_file=gitlab-stats.csv
+```text
+python gitlab.py --help
 ```
 
-2. Create a CSV file in the `data/` directory with columns:
-   - `Name`: Project name
-   - `Migrate Repo`: Filter value (e.g., "Migrate", "Yes")
+### Project source
 
-3. Optionally customize filter values:
+| Flag | Default | Notes |
+|---|---|---|
+| `--group` | env `GITLAB_GROUP` / config | Group full path or numeric ID. Required (via flag, env, or config). |
+
+### Authentication
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--gitlab-url` | env `GITLAB_URL` or `https://gitlab.com` | |
+| `--token` | env `GITLAB_TOKEN` | Single PAT |
+| `--tokens` | env `GITLAB_TOKENS` | Comma-separated PATs for round-robin pool |
+| `--tokens-file` | — | One PAT per line (`#` comments) |
+
+### Performance
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--workers-per-token` | `4` | Concurrent worker threads per token |
+| `--rate-limit-floor` | `50` | Pause a token when `RateLimit-Remaining` drops below this |
+| `--no-branch-walk` | off | Skip per-branch commit + file walks (much faster; uses API-reported `commit_count` from default branch only and loses cross-branch file dedup) |
+
+### Output / resume
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--output` | `data/gitlab-stats.csv` | |
+| `--checkpoint` | `data/.processed_projects` | Append-only list of completed project IDs |
+| `--no-resume` | off | Ignore checkpoint; reprocess everything |
+| `--verbose` / `-v` | off | DEBUG logging (retries, 429s, etc.) |
+
+## Configuration sources (priority order)
+
+1. CLI args (`--group`, `--tokens`, `--gitlab-url`, …)
+2. Environment (`GITLAB_TOKEN`, `GITLAB_TOKENS`, `GITLAB_GROUP`, `GITLAB_URL`)
+   — includes values auto-loaded from a `.env` file in the current
+   working directory (or any parent) or next to `gitlab_client.py` at
+   the workspace root.
+3. `gl-migrate.conf` (JSON, or `key=value` lines)
+4. `.token` (JSON)
+
+> Shell-set environment variables ALWAYS win over `.env` (the autoload
+> uses `override=False`).
+
+Example `gl-migrate.conf`:
+
 ```ini
-migrate_repo_values=["Migrate", "Yes"]
+# Tokens — single
+GITLAB_TOKEN=glpat-xxxxxxxxxxxx
+# (or use GITLAB_TOKENS=a,b,c at the env level for multiple)
+
+GITLAB_GROUP=engineering
+GITLAB_URL=https://gitlab.example.com
+
+# Optional: pre-filter projects via an existing CSV
+project_list_file=projects-to-migrate.csv
+migrate_repo_values=["Migrate","Yes"]
 ```
+
+Example `.token` (JSON):
+
+```json
+{
+  "token": "glpat-xxxxxxxxxxxx",
+  "group": "engineering",
+  "gitlab_url": "https://gitlab.example.com"
+}
+```
+
+## Resume after Ctrl+C / crash
+
+Just re-run with the same args. Completed project IDs are stored in
+`data/.processed_projects` and skipped on the next run. The CSV is opened
+in append mode and reuses the existing header.
+
+To start from scratch:
+
+```powershell
+python gitlab.py --no-resume
+# or delete data/.processed_projects and data/gitlab-stats.csv first
+```
+
+## Performance notes
+
+For 1000+ projects the dominant cost is the **per-branch commit / file
+walks**. Order-of-magnitude estimates:
+
+| Mode | Per project (typical repo) | 1000 projects, 1 token, 4 workers | 1000 projects, 3 tokens × 4 workers |
+|---|---|---|---|
+| Default (`get_all_branches_*` ON) | 30 s – many minutes | hours to a full day | hours |
+| `--no-branch-walk` | ~5–15 s | tens of minutes | minutes |
+
+If you don't strictly need cross-branch commit/file counts for migration
+sizing, **start with `--no-branch-walk`**.
+
+## Project pre-filtering (optional)
+
+To inventory only a subset of projects, set `project_list_file` in the
+config and create a CSV in `data/` with these columns:
+
+| Column | |
+|---|---|
+| `Name` | The project name as it appears in GitLab |
+| `Migrate Repo` | Filter value (defaults match `MIGRATE_REPO_VALUES`, default `["Migrate"]`) |
+
+> ⚠ Do **not** point `project_list_file` at the output `gitlab-stats.csv` —
+> the script writes to that file and would overwrite the input.
 
 ## Troubleshooting
 
-### "No GitLab token found"
-- Ensure you've set the `GITLAB_TOKEN` environment variable
-- Verify the token is set in your current terminal session:
-  - PowerShell: `echo $env:GITLAB_TOKEN`
-  - Bash: `echo $GITLAB_TOKEN`
-
 ### "No GitLab group defined"
-- Ensure you've set the `GITLAB_GROUP` environment variable
-- Verify the group name is correct
-- For subgroups, use the full path (e.g., "parent-group/subgroup")
+Set `--group`, `GITLAB_GROUP` env var, or `group` in your config file.
+For subgroups, pass the full path (`parent-group/subgroup`) — the script
+URL-encodes it automatically.
 
-### "Group not found" error
-- Verify the group name is correct
-- Ensure your token has access to the group
-- Check that the token has `read_api` and `read_repository` scopes
+### "No GitLab token(s)"
+Provide `--token`, `--tokens`, `--tokens-file`, or set `GITLAB_TOKEN` /
+`GITLAB_TOKENS` env vars (or put them in a `.env` file at the workspace
+root).
 
-### Rate limiting
-- The script respects GitLab API rate limits
-- For large groups (>100 projects), the script may take several minutes
-- Consider running during off-peak hours for very large groups
-Keep your GitLab access token secure and never commit it to version control
-- Use tokens with minimum required permissions (`read_api`, `read_repository`)
-- Environment variables are cleared when you close your terminal session
-- For persistent credentials, consider using your shell's profile configuration (e.g., `.bashrc`, PowerShell profile)ersion control
-- Keep your GitLab access token secure
-- Use tokens with minimum required permissions
-- Consider using environment variables in CI/CD environments
+### `.env` is found but the first variable is `None`
+The file was saved with a UTF-8 BOM (byte-order mark). Re-save it as
+plain UTF-8 *without* a BOM:
 
-## Output Directory
+- **VS Code**: bottom-right encoding picker → "Save with Encoding" → "UTF-8".
+- **Notepad++**: "Encoding" menu → "UTF-8" (not "UTF-8-BOM").
+- **PowerShell 7+**: `Set-Content -Encoding utf8NoBOM .env ...`.
+- **PowerShell 5**: avoid `Set-Content`; use VS Code or `notepad` to edit.
 
-All output files are saved to the `data/` subdirectory, which is automatically created if it doesn't exist.
+### Hitting 429s constantly
+Your tokens are all on the same user, or your workers-per-token is too
+aggressive for your instance. Try:
 
-## License
+```powershell
+python gitlab.py --workers-per-token 2 --rate-limit-floor 100
+```
 
-This script is provided as-is for GitLab inventory and migration planning purposes.
+### Output CSV is locked (open in Excel)
+The script falls back to a timestamped backup name automatically. Close
+Excel before re-running for a clean output.
+
+### Need a clean run after schema/code changes
+Delete `data/.processed_projects` and `data/gitlab-stats.csv` first, or
+pass `--no-resume` and overwrite the output (`--output other.csv`).
+
+## Security
+
+- Tokens are masked in logs (`glpat-xx...yyyy`).
+- Use tokens with the **minimum** scopes: `read_api`, `read_repository`.
+- Never commit `gl-migrate.conf` / `.token` to version control. Add them
+  to `.gitignore`.
