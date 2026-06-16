@@ -1,0 +1,70 @@
+[2026-06-16 12:11:34] GitLab Registry Inventory Tool v1.0.0
+[2026-06-16 12:11:34] GitLab URL: https://gitlab.com
+[2026-06-16 12:11:34] Group:      ranjiths-infomagnus-group
+[2026-06-16 12:11:34] Tokens:     1 configured
+[2026-06-16 12:11:34]   Token 1: glpat-a7...kfwu
+[2026-06-16 12:11:34] Scans:      Package Registry, Container Registry, Artifacts
+[2026-06-16 12:11:34] Summary mode (default): one row per package/repo/project.
+[2026-06-16 12:11:34] Output:     gitlab-inventory-tool\gitlab-registry-inventory.xlsx
+[2026-06-16 12:11:34] Discovering projects under group: ranjiths-infomagnus-group
+[2026-06-16 12:11:36] Found 5 projects in group "ranjiths-infomagnus-group"
+[2026-06-16 12:11:36] [DEBUG] Project IDs: [83044636, 83008107, 82751829, 82751815, 82744757]
+[2026-06-16 12:11:36] [1/5] Scanning: ranjiths-infomagnus-group/dummy_aws_project
+[2026-06-16 12:11:36] [DEBUG] Fetching packages for project 83044636 (ranjiths-infomagnus-group/dummy_aws_project)
+[2026-06-16 12:11:37] [DEBUG]   Found 3 packages for ranjiths-infomagnus-group/dummy_aws_project
+[2026-06-16 12:11:41]   Packages: 3 version(s)
+[2026-06-16 12:11:41] [DEBUG] Fetching container registries for project 83044636 (ranjiths-infomagnus-group/dummy_aws_project)
+[2026-06-16 12:11:42] [DEBUG]   Found 1 container repositories for ranjiths-infomagnus-group/dummy_aws_project
+[2026-06-16 12:11:53]   Containers: 9 tag(s)
+[2026-06-16 12:11:53] [DEBUG] Fetching jobs with artifacts for project 83044636 (ranjiths-infomagnus-group/dummy_aws_project)
+[2026-06-16 12:11:55] [DEBUG]   Found 44 total jobs for ranjiths-infomagnus-group/dummy_aws_project
+[2026-06-16 12:11:55] [DEBUG]   Found 43 jobs with artifacts for ranjiths-infomagnus-group/dummy_aws_project
+[2026-06-16 12:11:55]   Artifacts: 43 job(s)
+[2026-06-16 12:11:55] [2/5] Scanning: ranjiths-infomagnus-group/gitlab-game-demo
+[2026-06-16 12:11:55] [DEBUG] Fetching packages for project 83008107 (ranjiths-infomagnus-group/gitlab-game-demo)
+[2026-06-16 12:11:56] [DEBUG]   No packages found for ranjiths-infomagnus-group/gitlab-game-demo
+[2026-06-16 12:11:56] [DEBUG] Fetching container registries for project 83008107 (ranjiths-infomagnus-group/gitlab-game-demo)
+[2026-06-16 12:11:57] [DEBUG]   No container repositories found for ranjiths-infomagnus-group/gitlab-game-demo
+[2026-06-16 12:11:57] [DEBUG] Fetching jobs with artifacts for project 83008107 (ranjiths-infomagnus-group/gitlab-game-demo)
+[2026-06-16 12:11:58] [DEBUG]   No jobs found for ranjiths-infomagnus-group/gitlab-game-demo
+[2026-06-16 12:11:58] [3/5] Scanning: ranjiths-infomagnus-group/ranjith_demo2
+[2026-06-16 12:11:58] [DEBUG] Fetching packages for project 82751829 (ranjiths-infomagnus-group/ranjith_demo2)
+[2026-06-16 12:11:59] [DEBUG]   No packages found for ranjiths-infomagnus-group/ranjith_demo2
+[2026-06-16 12:11:59] [DEBUG] Fetching container registries for project 82751829 (ranjiths-infomagnus-group/ranjith_demo2)
+[2026-06-16 12:12:00] [DEBUG]   No container repositories found for ranjiths-infomagnus-group/ranjith_demo2
+[2026-06-16 12:12:00] [DEBUG] Fetching jobs with artifacts for project 82751829 (ranjiths-infomagnus-group/ranjith_demo2)
+[2026-06-16 12:12:01] [DEBUG]   No jobs found for ranjiths-infomagnus-group/ranjith_demo2
+[2026-06-16 12:12:01] [4/5] Scanning: ranjiths-infomagnus-group/ranjith_demo
+[2026-06-16 12:12:01] [DEBUG] Fetching packages for project 82751815 (ranjiths-infomagnus-group/ranjith_demo)
+[2026-06-16 12:12:02] [DEBUG]   No packages found for ranjiths-infomagnus-group/ranjith_demo
+[2026-06-16 12:12:02] [DEBUG] Fetching container registries for project 82751815 (ranjiths-infomagnus-group/ranjith_demo)
+[2026-06-16 12:12:03] [DEBUG]   No container repositories found for ranjiths-infomagnus-group/ranjith_demo
+[2026-06-16 12:12:03] [DEBUG] Fetching jobs with artifacts for project 82751815 (ranjiths-infomagnus-group/ranjith_demo)
+[2026-06-16 12:12:03] [DEBUG]   No jobs found for ranjiths-infomagnus-group/ranjith_demo
+[2026-06-16 12:12:03] [5/5] Scanning: ranjiths-infomagnus-group/ranjiths-infomagnus-project
+[2026-06-16 12:12:03] [DEBUG] Fetching packages for project 82744757 (ranjiths-infomagnus-group/ranjiths-infomagnus-project)
+[2026-06-16 12:12:04] [DEBUG]   No packages found for ranjiths-infomagnus-group/ranjiths-infomagnus-project
+[2026-06-16 12:12:04] [DEBUG] Fetching container registries for project 82744757 (ranjiths-infomagnus-group/ranjiths-infomagnus-project)
+[2026-06-16 12:12:05] [DEBUG]   No container repositories found for ranjiths-infomagnus-group/ranjiths-infomagnus-project
+[2026-06-16 12:12:05] [DEBUG] Fetching jobs with artifacts for project 82744757 (ranjiths-infomagnus-group/ranjiths-infomagnus-project)
+[2026-06-16 12:12:06] [DEBUG]   No jobs found for ranjiths-infomagnus-group/ranjiths-infomagnus-project
+[2026-06-16 12:12:06] Aggregated: 3 pkg versions -> 1 packages, 9 tags -> 1 repos, 43 jobs -> 1 projects
+[2026-06-16 12:12:07] Excel workbook written: gitlab-inventory-tool\gitlab-registry-inventory.xlsx
+[2026-06-16 12:12:07] ============================================================
+[2026-06-16 12:12:07] Summary
+[2026-06-16 12:12:07] ============================================================
+[2026-06-16 12:12:07]   Projects scanned:     5
+[2026-06-16 12:12:07]   Failed projects:      0
+[2026-06-16 12:12:07]   Package versions:     3
+[2026-06-16 12:12:07]   Unique packages:      1
+[2026-06-16 12:12:07]   Package total size:   0.01 MB
+[2026-06-16 12:12:07]     maven: 3 version(s)
+[2026-06-16 12:12:07]   Container repos:      1
+[2026-06-16 12:12:07]   Container tags:       9
+[2026-06-16 12:12:07]   Container total size: 640.37 MB
+[2026-06-16 12:12:07]   Jobs with artifacts:  43
+[2026-06-16 12:12:07]   Artifact total size:  0.02 MB
+[2026-06-16 12:12:07]   Output file:          gitlab-inventory-tool\gitlab-registry-inventory.xlsx
+[2026-06-16 12:12:07]   Log file:             gitlab-inventory-tool/registry_inventory.log
+[2026-06-16 12:12:07]   Execution time:       0h 0m 33s
+[2026-06-16 12:12:07] ============================================================
