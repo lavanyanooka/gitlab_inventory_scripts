@@ -11,6 +11,7 @@ During GH-to-GH package migrations, SHAs were observed to change after migration
 | Script | Purpose |
 |--------|---------|
 | `migrate_packages.py` | Downloads packages from GitLab, uploads to GitHub Packages |
+| `migrate_containers.py` | Copies container images from GitLab Registry to GHCR with digest verification |
 | `verify_sha.py` | Compares SHA-256 checksums pre/post migration to detect integrity changes |
 
 ## Supported Package Types
