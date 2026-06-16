@@ -1,0 +1,7 @@
+# Shared dependencies for all GitLab inventory scripts.
+#
+# Install from this workspace root:
+#     pip install -r requirements.txt
+
+requests>=2.31.0
+python-dotenv>=1.0.0
