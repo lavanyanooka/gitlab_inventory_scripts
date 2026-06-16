@@ -34,8 +34,8 @@ Discovers Groups, Subgroups, Projects, and Runners. Generates `GitLab_Inventory_
 ### Usage
 
 ```bash
-python inventory.py --group my-org --token glpat-xxx --debug
-python inventory.py --group my-org --tokens "t1,t2,t3" --output report.xlsx
+python runner_inventory.py --group my-org --token glpat-xxx --debug
+python runner_inventory.py --group my-org --tokens "t1,t2,t3" --output report.xlsx
 ```
 
 ### CLI Options
