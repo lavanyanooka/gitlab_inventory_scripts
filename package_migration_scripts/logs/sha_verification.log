@@ -1,0 +1,41 @@
+[2026-06-17 12:11:03] INFO - SHA Verification Tool v1.0.0
+[2026-06-17 12:11:03] INFO - Working directory: C:\Users\RUSHIK~1\AppData\Local\Temp\sha_verify_qzzmh38s
+[2026-06-17 12:11:03] INFO - Starting full SHA verification scan for group: ranjiths-infomagnus-group
+[2026-06-17 12:11:04] INFO - Found 5 projects
+[2026-06-17 12:11:05] INFO - 
+Project: ranjiths-infomagnus-group/dummy_aws_project (3 packages)
+[2026-06-17 12:11:05] INFO -   [maven] com/infomagnus/dummy-aws-project@1.0.0
+[2026-06-17 12:11:08] INFO -     dummy-aws-project-1.0.0.jar: MATCH
+[2026-06-17 12:11:08] INFO -   [maven] com/infomagnus/dummy-aws-project@1.0.1
+[2026-06-17 12:11:11] INFO -     dummy-aws-project-1.0.1.jar: MATCH
+[2026-06-17 12:11:11] INFO -   [maven] com/infomagnus/dummy-aws-project@1.0.2
+[2026-06-17 12:11:15] INFO -     dummy-aws-project-1.0.2.jar: SHA MISMATCH!
+[2026-06-17 12:11:15] INFO -       GitLab: 3046cb6162cc7573746f96e1b33c4b53f0914c275c2c75570bb5b0c4a2cfe0bd
+[2026-06-17 12:11:15] INFO -       GitHub: 7eb73683ffa50f0bcec50ff842cec93eb0334ed0123d9c7fac002e2b7258ff14
+[2026-06-17 12:11:17] INFO -     dummy-aws-project-1.0.2.pom: MATCH
+[2026-06-17 12:11:20] INFO -     dummy-aws-project-1.0.2.jar: MATCH
+[2026-06-17 12:11:22] INFO - 
+Verification report saved to: C:\Users\RUSHIK~1\AppData\Local\Temp\sha_verify_qzzmh38s\sha_verification_report.json
+[2026-06-17 12:11:22] INFO - 
+============================================================
+[2026-06-17 12:11:22] INFO - SHA VERIFICATION SUMMARY
+[2026-06-17 12:11:22] INFO - ============================================================
+[2026-06-17 12:11:22] INFO -   Total files checked:        5
+[2026-06-17 12:11:22] INFO -   SHA matches (identical):    4
+[2026-06-17 12:11:22] INFO -   SHA mismatches (CHANGED):   1
+[2026-06-17 12:11:22] INFO -   Not found on GitHub:        0
+[2026-06-17 12:11:22] INFO -   Not found on GitLab:        0
+[2026-06-17 12:11:22] INFO -   Errors:                     0
+[2026-06-17 12:11:22] INFO - 
+  MISMATCH DETAILS (SHAs changed during migration):
+[2026-06-17 12:11:22] INFO -   --------------------------------------------------------
+[2026-06-17 12:11:22] INFO -   Package: com/infomagnus/dummy-aws-project@1.0.2
+[2026-06-17 12:11:22] INFO -   File:    dummy-aws-project-1.0.2.jar
+[2026-06-17 12:11:22] INFO -   Type:    maven
+[2026-06-17 12:11:22] INFO -   GitLab:  3046cb6162cc7573746f96e1b33c4b53f0914c275c2c75570bb5b0c4a2cfe0bd
+[2026-06-17 12:11:22] INFO -   GitHub:  7eb73683ffa50f0bcec50ff842cec93eb0334ed0123d9c7fac002e2b7258ff14
+[2026-06-17 12:11:22] INFO -   --------------------------------------------------------
+[2026-06-17 12:11:22] INFO - 
+  CONCLUSION: SHA changes detected! Similar to GH-GH migration issue.
+[2026-06-17 12:11:22] INFO -   Investigate whether GitHub re-processes/re-packages files on upload.
+[2026-06-17 12:11:22] INFO - ============================================================

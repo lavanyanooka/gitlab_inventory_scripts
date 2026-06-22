@@ -1,0 +1,40 @@
+[2026-06-17 14:47:25] INFO - GitLab-to-GitHub Package Migration Tool v1.0.0
+[2026-06-17 14:47:25] INFO - GitLab URL: https://gitlab.com
+[2026-06-17 14:47:25] INFO - GitLab Group: ranjiths-infomagnus-group
+[2026-06-17 14:47:25] INFO - GitHub Org: im-sandbox-rushik
+[2026-06-17 14:47:25] INFO - Working directory: C:\Users\RUSHIK~1\AppData\Local\Temp\gl2gh_pkg_58tlfyav
+[2026-06-17 14:47:25] INFO - Starting package migration from GitLab group: ranjiths-infomagnus-group
+[2026-06-17 14:47:25] INFO - Mode: LIVE MIGRATION
+[2026-06-17 14:47:27] INFO - Found 5 projects in group 'ranjiths-infomagnus-group'
+[2026-06-17 14:47:27] INFO - 
+Processing project: ranjiths-infomagnus-group/dummy_aws_project -> im-sandbox-rushik/dummy_aws_project
+[2026-06-17 14:47:27] INFO -   Found 3 package(s)
+[2026-06-17 14:47:27] INFO -   [maven] com/infomagnus/dummy-aws-project@1.0.0 (id=62012050)
+[2026-06-17 14:47:31] INFO -     ALREADY EXISTS: dummy-aws-project-1.0.0.jar (409 Conflict)
+[2026-06-17 14:47:31] INFO -   [maven] com/infomagnus/dummy-aws-project@1.0.1 (id=62110766)
+[2026-06-17 14:47:32] INFO -     ALREADY EXISTS: dummy-aws-project-1.0.1.jar (409 Conflict)
+[2026-06-17 14:47:32] INFO -   [maven] com/infomagnus/dummy-aws-project@1.0.2 (id=62114935)
+[2026-06-17 14:47:35] INFO -     ALREADY EXISTS: dummy-aws-project-1.0.2.jar (409 Conflict)
+[2026-06-17 14:47:36] INFO -     ALREADY EXISTS: dummy-aws-project-1.0.2.pom (409 Conflict)
+[2026-06-17 14:47:37] INFO -     ALREADY EXISTS: dummy-aws-project-1.0.2.jar (409 Conflict)
+[2026-06-17 14:47:37] INFO - 
+Processing project: ranjiths-infomagnus-group/gitlab-game-demo -> im-sandbox-rushik/gitlab-game-demo
+[2026-06-17 14:47:37] INFO - 
+Processing project: ranjiths-infomagnus-group/ranjith_demo2 -> im-sandbox-rushik/ranjith_demo2
+[2026-06-17 14:47:38] INFO - 
+Processing project: ranjiths-infomagnus-group/ranjith_demo -> im-sandbox-rushik/ranjith_demo
+[2026-06-17 14:47:38] INFO - 
+Processing project: ranjiths-infomagnus-group/ranjiths-infomagnus-project -> im-sandbox-rushik/ranjiths-infomagnus-project
+[2026-06-17 14:47:39] INFO - 
+Report saved to: C:\Users\RUSHIK~1\AppData\Local\Temp\gl2gh_pkg_58tlfyav\migration_report.json
+[2026-06-17 14:47:39] INFO - 
+============================================================
+[2026-06-17 14:47:39] INFO - MIGRATION SUMMARY
+[2026-06-17 14:47:39] INFO - ============================================================
+[2026-06-17 14:47:39] INFO -   Packages found:    3
+[2026-06-17 14:47:39] INFO -   Packages migrated: 0
+[2026-06-17 14:47:39] INFO -   Packages skipped:  3
+[2026-06-17 14:47:39] INFO -   Packages failed:   0
+[2026-06-17 14:47:39] INFO -   SHA mismatches:    0
+[2026-06-17 14:47:39] INFO -   Errors:            0
+[2026-06-17 14:47:39] INFO - ============================================================

@@ -1,0 +1,89 @@
+{
+  "started_at": "2026-06-17T09:17:40.468788",
+  "tool": "crane",
+  "mode": "live",
+  "images_found": 1,
+  "tags_found": 9,
+  "tags_migrated": 0,
+  "tags_failed": 0,
+  "tags_skipped": 9,
+  "digest_matches": 9,
+  "digest_mismatches": 0,
+  "mismatches": [],
+  "errors": [],
+  "details": [
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:0dc768e8",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:0dc768e8",
+      "tag": "0dc768e8",
+      "source_digest": "sha256:9c43a9c5f2817f393c08a770f522a9ab3dc5d22d1f1a345863fc888bfa36e374",
+      "status": "already-exists",
+      "dest_digest": "sha256:9c43a9c5f2817f393c08a770f522a9ab3dc5d22d1f1a345863fc888bfa36e374"
+    },
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:1.0.1",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:1.0.1",
+      "tag": "1.0.1",
+      "source_digest": "sha256:91979c38a4d6eee6a48dd1efa0dcf3402add5d9b900871c74a624b6d7f50d369",
+      "status": "already-exists",
+      "dest_digest": "sha256:91979c38a4d6eee6a48dd1efa0dcf3402add5d9b900871c74a624b6d7f50d369"
+    },
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:1.0.2",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:1.0.2",
+      "tag": "1.0.2",
+      "source_digest": "sha256:3396dbb05bd2f101a629e0c938d1d33e0e6759243fb8bca5ac4d374e4346d694",
+      "status": "already-exists",
+      "dest_digest": "sha256:3396dbb05bd2f101a629e0c938d1d33e0e6759243fb8bca5ac4d374e4346d694"
+    },
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:148e9884",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:148e9884",
+      "tag": "148e9884",
+      "source_digest": "sha256:425feb5a7a0e45032950dc7274c9f99a26ba2cedec9c507376052618a67050e5",
+      "status": "already-exists",
+      "dest_digest": "sha256:425feb5a7a0e45032950dc7274c9f99a26ba2cedec9c507376052618a67050e5"
+    },
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:36c01b5e",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:36c01b5e",
+      "tag": "36c01b5e",
+      "source_digest": "sha256:57ae3408a252dffa96443378462379758dc7dcb2e666708abfd2dc14e77e729d",
+      "status": "already-exists",
+      "dest_digest": "sha256:57ae3408a252dffa96443378462379758dc7dcb2e666708abfd2dc14e77e729d"
+    },
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:43824a6b",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:43824a6b",
+      "tag": "43824a6b",
+      "source_digest": "sha256:bf33033d9fc9f002607a5bba4a4f3e345c63d46008ffca75904f018c89aa7a63",
+      "status": "already-exists",
+      "dest_digest": "sha256:bf33033d9fc9f002607a5bba4a4f3e345c63d46008ffca75904f018c89aa7a63"
+    },
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:56444f99",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:56444f99",
+      "tag": "56444f99",
+      "source_digest": "sha256:b348ea2df65fc4f83003cc117fd6c2bb4e15990127626bf942ee36451c3d72d3",
+      "status": "already-exists",
+      "dest_digest": "sha256:b348ea2df65fc4f83003cc117fd6c2bb4e15990127626bf942ee36451c3d72d3"
+    },
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:ac5efeaf",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:ac5efeaf",
+      "tag": "ac5efeaf",
+      "source_digest": "sha256:a39359470b08074b927e90c2c5d7ae101f7e68c79cffef0754c08269fae111b7",
+      "status": "already-exists",
+      "dest_digest": "sha256:a39359470b08074b927e90c2c5d7ae101f7e68c79cffef0754c08269fae111b7"
+    },
+    {
+      "source": "registry.gitlab.com/ranjiths-infomagnus-group/dummy_aws_project:latest",
+      "destination": "ghcr.io/im-sandbox-rushik/ranjiths-infomagnus-group-dummy_aws_project:latest",
+      "tag": "latest",
+      "source_digest": "sha256:3396dbb05bd2f101a629e0c938d1d33e0e6759243fb8bca5ac4d374e4346d694",
+      "status": "already-exists",
+      "dest_digest": "sha256:3396dbb05bd2f101a629e0c938d1d33e0e6759243fb8bca5ac4d374e4346d694"
+    }
+  ],
+  "completed_at": "2026-06-17T09:18:01.681518"
+}
