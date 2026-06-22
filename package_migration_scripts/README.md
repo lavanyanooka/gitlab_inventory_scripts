@@ -2,6 +2,29 @@
 
 Tools for migrating packages from GitLab Package Registry to GitHub Packages, with SHA-256 integrity verification.
 
+## Folder Structure
+
+```
+package_migration_scripts/
+├── docs/
+│   └── packagemigration.md
+├── inventory/
+│   └── gitlab-registry-inventory.xlsx
+├── logs/
+│   ├── container_migration.log
+│   ├── package_migration.log
+│   └── sha_verification.log
+├── reports/
+│   └── container_migration_report.json
+├── migrate_containers.py
+├── migrate_packages.py
+├── verify_sha.py
+├── requirements.txt
+└── README.md
+```
+
+For full runbook-style instructions, see `docs/packagemigration.md`.
+
 ## Background
 
 During GH-to-GH package migrations, SHAs were observed to change after migration. These scripts verify whether the same issue occurs in GitLab-to-GitHub migrations.
@@ -114,6 +137,8 @@ python verify_sha.py \
 ```
 
 ## Output Reports
+
+By default, script reports are generated in the script working directory you run with (`--work-dir` for package migration can override this). You can keep finalized reports under `reports/`.
 
 ### migration_report.json
 ```json

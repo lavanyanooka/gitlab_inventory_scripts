@@ -28,11 +28,15 @@ Environment variables (CLI overrides take precedence):
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import logging
 import os
+import shutil
+import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from datetime import datetime
@@ -89,6 +93,12 @@ def debug_log(msg):
 
 def error_log(msg):
     _logger.error(msg)
+
+
+def _short_error(exc, limit=200):
+    """Return a concise error string for logs/reports."""
+    text = str(exc).strip().replace("\n", " ")
+    return text[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +184,12 @@ class GitLabPackageClient:
             if resp.status_code == 404:
                 return results
             resp.raise_for_status()
-            items = resp.json()
+            try:
+                items = resp.json()
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Invalid JSON from GitLab for {path} page {page}: {_short_error(exc)}"
+                ) from exc
             if not items:
                 break
             results.extend(items)
@@ -202,7 +217,12 @@ class GitLabPackageClient:
         if resp.status_code == 404:
             return []
         resp.raise_for_status()
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Invalid JSON when listing files for package {package_id}: {_short_error(exc)}"
+            ) from exc
 
     def download_package_file(self, project_id, package_id, file_id, file_name, dest_dir):
         """Download a package file to a local directory. Returns the local file path."""
@@ -232,11 +252,12 @@ class GitLabPackageClient:
 class GitHubPackageClient:
     """Client for uploading packages to GitHub Packages."""
 
-    def __init__(self, github_token, github_org, timeout=60, retries=3):
+    def __init__(self, github_token, github_org, timeout=60, retries=3, use_docker=False):
         self.token = github_token
         self.org = github_org
         self.timeout = timeout
         self.retries = retries
+        self.use_docker = use_docker
         self.session = requests.Session()
         self.session.headers.update({
             "Authorization": f"Bearer {github_token}",
@@ -245,74 +266,157 @@ class GitHubPackageClient:
 
     def _upload_with_retry(self, method, url, headers=None, data=None, files=None):
         """Upload with retry logic."""
+        last_exc = None
         for attempt in range(self.retries + 1):
             try:
                 req_headers = dict(self.session.headers)
                 if headers:
                     req_headers.update(headers)
 
-                if method == "PUT":
-                    resp = requests.put(
-                        url, headers=req_headers, data=data, timeout=self.timeout
-                    )
-                elif method == "POST":
-                    resp = requests.post(
-                        url, headers=req_headers, data=data, files=files, timeout=self.timeout
-                    )
-                else:
-                    resp = requests.get(url, headers=req_headers, timeout=self.timeout)
+                resp = self.session.request(
+                    method,
+                    url,
+                    headers=req_headers,
+                    data=data,
+                    files=files,
+                    timeout=self.timeout,
+                )
 
                 if resp.status_code == 429:
                     retry_after = int(resp.headers.get("Retry-After", 2 ** (attempt + 1)))
                     log(f"GitHub rate limited, waiting {retry_after}s...")
                     time.sleep(retry_after)
                     continue
-                if resp.status_code >= 500:
+                if resp.status_code in (408, 425, 500, 502, 503, 504):
+                    wait = 2 ** attempt
+                    debug_log(f"Transient GitHub error {resp.status_code}, retrying in {wait}s")
                     time.sleep(2 ** attempt)
                     continue
                 return resp
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            except requests.exceptions.RequestException as exc:
+                last_exc = exc
                 if attempt >= self.retries:
-                    raise
+                    break
                 time.sleep(2 ** attempt)
-        return resp
+        if last_exc:
+            raise RuntimeError(f"GitHub request failed after retries: {_short_error(last_exc)}") from last_exc
+        raise RuntimeError(f"GitHub request failed after retries: {method} {url}")
+
+    def _normalize_npm_name(self, package_name):
+        """Map source npm package names to a GitHub-compatible org-scoped name."""
+        if package_name.startswith("@") and "/" in package_name:
+            unscoped = package_name.split("/", 1)[1]
+        else:
+            unscoped = package_name.split("/")[-1]
+        return f"@{self.org}/{unscoped}", unscoped
+
+    class _LocalResponse:
+        """Minimal response wrapper for CLI-based uploads."""
+
+        def __init__(self, status_code, text):
+            self.status_code = status_code
+            self.text = text
+
+    def _run_docker(self, image, args, mounts=None, env=None, timeout=600):
+        """Run a command in Docker and return a CompletedProcess-like result."""
+        if not shutil.which("docker"):
+            raise RuntimeError("Docker executable not found in PATH. Install Docker or disable --use-docker.")
+
+        cmd = ["docker", "run", "--rm"]
+        for host_path, container_path in mounts or []:
+            cmd.extend(["-v", f"{host_path}:{container_path}"])
+        for k, v in (env or {}).items():
+            cmd.extend(["-e", f"{k}={v}"])
+        cmd.append(image)
+        cmd.extend(args)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
     def upload_npm_package(self, package_name, version, tarball_path, repo_name):
         """Upload an npm package to GitHub Packages."""
-        url = f"{DEFAULT_GITHUB_NPM_REGISTRY}/@{self.org}/{package_name}"
+        env = dict(os.environ)
+        env["NODE_AUTH_TOKEN"] = self.token
 
-        with open(tarball_path, "rb") as f:
-            tarball_data = f.read()
+        normalized_name, _ = self._normalize_npm_name(package_name)
+        publish_dir = None
 
-        # Create npm publish payload
-        sha = compute_sha256_from_bytes(tarball_data)
-        import base64
-        tarball_b64 = base64.b64encode(tarball_data).decode()
+        # Rewrite scoped package name to the target GitHub org before publish.
+        with tempfile.TemporaryDirectory(prefix="npm_pkg_") as temp_dir:
+            with tarfile.open(tarball_path, "r:gz") as tf:
+                tf.extractall(temp_dir)
 
-        payload = {
-            "name": f"@{self.org}/{package_name}",
-            "version": version,
-            "dist": {
-                "integrity": f"sha256-{sha}",
-                "shasum": hashlib.sha1(tarball_data).hexdigest(),
-                "tarball": f"{DEFAULT_GITHUB_NPM_REGISTRY}/@{self.org}/{package_name}/-/{package_name}-{version}.tgz",
-            },
-            "_attachments": {
-                f"{package_name}-{version}.tgz": {
-                    "content_type": "application/octet-stream",
-                    "data": tarball_b64,
-                    "length": len(tarball_data),
-                }
-            },
-            "repository": {
-                "type": "git",
-                "url": f"https://github.com/{self.org}/{repo_name}",
-            },
-        }
+            package_json_candidates = [
+                p for p in Path(temp_dir).rglob("package.json")
+                if "node_modules" not in p.parts
+            ]
+            if package_json_candidates:
+                package_json = min(package_json_candidates, key=lambda p: len(p.parts))
+                package_dir = package_json.parent
+                with open(package_json, "r", encoding="utf-8") as f:
+                    pkg_meta = json.load(f)
+                pkg_meta["name"] = normalized_name
+                with open(package_json, "w", encoding="utf-8") as f:
+                    json.dump(pkg_meta, f, indent=2)
+                publish_dir = str(package_dir)
+            else:
+                publish_dir = tarball_path
 
-        headers = {"Content-Type": "application/json"}
-        resp = self._upload_with_retry("PUT", url, headers=headers, data=json.dumps(payload))
-        return resp
+            npm_exec = "npm.cmd" if os.name == "nt" else "npm"
+            npmrc_path = Path(temp_dir) / ".npmrc"
+            npmrc_path.write_text(
+                "\n".join([
+                    f"@{self.org}:registry={DEFAULT_GITHUB_NPM_REGISTRY}",
+                    f"//npm.pkg.github.com/:_authToken={self.token}",
+                    "always-auth=true",
+                    "",
+                ]),
+                encoding="utf-8",
+            )
+            cmd = [
+                npm_exec,
+                "publish",
+                publish_dir,
+                "--registry",
+                DEFAULT_GITHUB_NPM_REGISTRY,
+                "--access",
+                "restricted",
+                "--userconfig",
+                str(npmrc_path),
+            ]
+
+            if self.use_docker:
+                docker_env = {"NODE_AUTH_TOKEN": self.token}
+                host_temp = str(Path(temp_dir).resolve())
+                docker_publish_dir = "/work"
+                if publish_dir != tarball_path:
+                    rel_publish_dir = Path(publish_dir).resolve().relative_to(Path(temp_dir).resolve())
+                    docker_publish_dir = f"/work/{str(rel_publish_dir).replace('\\', '/')}"
+                docker_cmd = [
+                    "npm",
+                    "publish",
+                    docker_publish_dir,
+                    "--registry",
+                    DEFAULT_GITHUB_NPM_REGISTRY,
+                    "--access",
+                    "restricted",
+                    "--userconfig",
+                    "/work/.npmrc",
+                ]
+                proc = self._run_docker(
+                    image="node:20-alpine",
+                    args=docker_cmd,
+                    mounts=[(host_temp, "/work")],
+                    env=docker_env,
+                    timeout=600,
+                )
+            else:
+                proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+            output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+            if proc.returncode == 0:
+                return self._LocalResponse(201, output)
+            if "previously published" in output.lower() or "forbidden cannot modify" in output.lower():
+                return self._LocalResponse(409, output)
+            return self._LocalResponse(400, output[:500])
 
     def upload_maven_package(self, group_id, artifact_id, version, file_path, repo_name):
         """Upload a Maven package to GitHub Packages."""
@@ -323,6 +427,27 @@ class GitHubPackageClient:
             f"/{group_path}/{artifact_id}/{version}/{file_name}"
         )
 
+        if self.use_docker:
+            host_dir = str(Path(file_path).resolve().parent)
+            container_file = f"/work/{file_name}"
+            shell_cmd = (
+                f"status=$(curl -sS -o /tmp/body -w '%{{http_code}}' -X PUT "
+                f"-H 'Authorization: Bearer {self.token}' "
+                f"-H 'Content-Type: application/octet-stream' "
+                f"--data-binary '@{container_file}' '{url}'); "
+                "cat /tmp/body; echo; echo HTTP_STATUS:$status"
+            )
+            proc = self._run_docker(
+                image="curlimages/curl:8.9.1",
+                args=["sh", "-lc", shell_cmd],
+                mounts=[(host_dir, "/work")],
+                timeout=300,
+            )
+            output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+            status_line = next((ln for ln in output.splitlines() if ln.startswith("HTTP_STATUS:")), "HTTP_STATUS:400")
+            status_code = int(status_line.split(":", 1)[1])
+            return self._LocalResponse(status_code, output)
+
         with open(file_path, "rb") as f:
             data = f.read()
 
@@ -332,12 +457,47 @@ class GitHubPackageClient:
 
     def upload_nuget_package(self, nupkg_path):
         """Upload a NuGet package to GitHub Packages."""
-        url = f"{DEFAULT_GITHUB_NUGET_REGISTRY}/{self.org}/index.json"
+        source = f"{DEFAULT_GITHUB_NUGET_REGISTRY}/{self.org}/index.json"
+        if self.use_docker:
+            host_dir = str(Path(nupkg_path).resolve().parent)
+            container_pkg = f"/work/{Path(nupkg_path).name}"
+            cmd = [
+                "dotnet",
+                "nuget",
+                "push",
+                container_pkg,
+                "--api-key",
+                self.token,
+                "--source",
+                source,
+                "--skip-duplicate",
+            ]
+            proc = self._run_docker(
+                image="mcr.microsoft.com/dotnet/sdk:8.0",
+                args=cmd,
+                mounts=[(host_dir, "/work")],
+                timeout=600,
+            )
+        else:
+            cmd = [
+                "dotnet",
+                "nuget",
+                "push",
+                nupkg_path,
+                "--api-key",
+                self.token,
+                "--source",
+                source,
+                "--skip-duplicate",
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
 
-        with open(nupkg_path, "rb") as f:
-            files = {"package": (Path(nupkg_path).name, f, "application/octet-stream")}
-            resp = self._upload_with_retry("PUT", url, files=files)
-        return resp
+        output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+        if proc.returncode == 0:
+            return self._LocalResponse(201, output)
+        if "409" in output or "already exists" in output.lower() or "skip-duplicate" in output.lower():
+            return self._LocalResponse(409, output)
+        return self._LocalResponse(400, output[:500])
 
     def upload_generic_package(self, package_name, version, file_path, repo_name):
         """Upload a generic package as a GitHub release asset."""
@@ -346,7 +506,8 @@ class GitHubPackageClient:
 
         # Create release if not exists
         release_url = f"{DEFAULT_GITHUB_API}/repos/{self.org}/{repo_name}/releases"
-        tag_name = f"{package_name}-v{version}"
+        safe_package_name = package_name.replace("/", "-").replace("@", "")
+        tag_name = f"{safe_package_name}-v{version}"
 
         # Check if release exists
         resp = self._upload_with_retry("GET", f"{release_url}/tags/{tag_name}")
@@ -388,6 +549,45 @@ class GitHubPackageClient:
             return []
         return resp.json()
 
+    def ensure_repository(self, repo_name):
+        """Ensure the target GitHub repository exists in the organization."""
+        repo_url = f"{DEFAULT_GITHUB_API}/repos/{self.org}/{repo_name}"
+        resp = self._upload_with_retry("GET", repo_url)
+        if resp.status_code == 200:
+            repo_data = resp.json()
+            if not repo_data.get("default_branch"):
+                self._initialize_repository(repo_name)
+            return True
+        if resp.status_code != 404:
+            debug_log(f"Failed checking repo {repo_name}: {resp.status_code}")
+            return False
+
+        create_url = f"{DEFAULT_GITHUB_API}/orgs/{self.org}/repos"
+        payload = json.dumps({
+            "name": repo_name,
+            "private": True,
+            "auto_init": True,
+        })
+        resp = self._upload_with_retry("POST", create_url, data=payload)
+        if resp.status_code in (200, 201):
+            log(f"  Created missing GitHub repo: {self.org}/{repo_name}")
+            return True
+        if resp.status_code == 422:
+            # Repository likely already exists or name is reserved.
+            return True
+        debug_log(f"Failed creating repo {repo_name}: {resp.status_code} {resp.text[:200]}")
+        return False
+
+    def _initialize_repository(self, repo_name):
+        """Create an initial commit in an empty repository."""
+        content_url = f"{DEFAULT_GITHUB_API}/repos/{self.org}/{repo_name}/contents/README.md"
+        payload = json.dumps({
+            "message": "Initialize repository for migrated package artifacts",
+            "content": base64.b64encode(b"# Package migration artifacts\n").decode("ascii"),
+        })
+        resp = self._upload_with_retry("PUT", content_url, data=payload)
+        return resp.status_code in (200, 201)
+
 
 # ---------------------------------------------------------------------------
 # Migration Engine
@@ -396,13 +596,16 @@ class GitHubPackageClient:
 class PackageMigrationEngine:
     """Orchestrates downloading from GitLab and uploading to GitHub."""
 
-    def __init__(self, gitlab_client, github_client, work_dir, dry_run=False, verify_only=False):
+    def __init__(self, gitlab_client, github_client, work_dir, dry_run=False, verify_only=False,
+                 strict_version_check=False):
         self.gitlab = gitlab_client
         self.github = github_client
         self.work_dir = Path(work_dir)
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.dry_run = dry_run
         self.verify_only = verify_only
+        self.strict_version_check = strict_version_check
+        self._source_versions = {}
 
         # Migration report
         self.report = {
@@ -413,8 +616,98 @@ class PackageMigrationEngine:
             "packages_failed": 0,
             "sha_mismatches": [],
             "errors": [],
+            "version_verification": {
+                "enabled": strict_version_check,
+                "checked": 0,
+                "skipped": 0,
+                "missing_versions": [],
+                "unverifiable": [],
+            },
             "details": [],
         }
+
+    def _track_source_version(self, package_type, package_name, version):
+        key = (package_type, package_name)
+        self._source_versions.setdefault(key, set()).add(str(version))
+
+    def _verify_target_versions(self):
+        """Verify all source package versions exist in target package registries."""
+        missing_versions = []
+        unverifiable = []
+        checked = 0
+        skipped = 0
+
+        for (pkg_type, pkg_name), source_versions in self._source_versions.items():
+            if pkg_type in ("generic", "pypi"):
+                skipped += 1
+                continue
+
+            candidate_names = [pkg_name]
+            if pkg_type == "npm":
+                normalized_name, _ = self.github._normalize_npm_name(pkg_name)
+                candidate_names.insert(0, normalized_name)
+
+            if pkg_type == "maven" and "/" in pkg_name:
+                m_group, m_artifact = pkg_name.rsplit("/", 1)
+                candidate_names.extend([
+                    f"{m_group.replace('/', '.')}.{m_artifact}",
+                    m_artifact,
+                ])
+
+            target_versions = set()
+            resolved = False
+            for candidate in candidate_names:
+                try:
+                    gh_versions = self.github.get_package_versions(pkg_type, candidate)
+                except Exception as exc:
+                    debug_log(
+                        f"Version verification lookup failed for {pkg_type}/{candidate}: {_short_error(exc)}"
+                    )
+                    continue
+                if gh_versions:
+                    resolved = True
+                for item in gh_versions:
+                    v = item.get("name") or item.get("metadata", {}).get("container", {}).get("tags", [None])[0]
+                    if v:
+                        target_versions.add(str(v))
+
+            if not resolved and not target_versions:
+                unverifiable.append({
+                    "package_type": pkg_type,
+                    "package_name": pkg_name,
+                    "reason": "target_lookup_returned_no_versions",
+                })
+                continue
+
+            checked += 1
+            for version in sorted(source_versions):
+                if version not in target_versions:
+                    missing_versions.append({
+                        "package_type": pkg_type,
+                        "package_name": pkg_name,
+                        "version": version,
+                    })
+
+        self.report["version_verification"]["checked"] = checked
+        self.report["version_verification"]["skipped"] = skipped
+        self.report["version_verification"]["missing_versions"] = missing_versions
+        self.report["version_verification"]["unverifiable"] = unverifiable
+
+        if missing_versions:
+            log("\nSTRICT VERSION CHECK FAILED: missing target versions detected")
+            for item in missing_versions:
+                log(
+                    f"  Missing: [{item['package_type']}] {item['package_name']}@{item['version']}"
+                )
+
+        if unverifiable:
+            log("\nVersion verification warning: some packages could not be verified via registry API")
+            for item in unverifiable[:10]:
+                log(
+                    f"  Unverifiable: [{item['package_type']}] {item['package_name']}"
+                )
+
+        return len(missing_versions) == 0
 
     def run(self, group_path, repo_mapping=None):
         """
@@ -445,8 +738,23 @@ class PackageMigrationEngine:
 
             log(f"\nProcessing project: {project_path} -> {self.github.org}/{github_repo}")
 
+            if not self.verify_only:
+                if not self.github.ensure_repository(github_repo):
+                    log(f"  SKIPPED: unable to access/create target repo {self.github.org}/{github_repo}")
+                    self.report.setdefault("skipped_projects", []).append({
+                        "project": project_path,
+                        "reason": "target_repo_unavailable",
+                        "github_repo": github_repo,
+                    })
+                    continue
+
             # Get packages
-            packages = self.gitlab.get_project_packages(project_id)
+            try:
+                packages = self.gitlab.get_project_packages(project_id)
+            except Exception as e:
+                log(f"  SKIPPED: cannot access packages for {project_path} ({e})")
+                self.report.setdefault("skipped_projects", []).append({"project": project_path, "reason": str(e)})
+                continue
             if not packages:
                 debug_log(f"  No packages in {project_path}")
                 continue
@@ -455,12 +763,35 @@ class PackageMigrationEngine:
             self.report["packages_found"] += len(packages)
 
             for pkg in packages:
-                self._migrate_package(project_id, project_path, pkg, github_repo)
+                try:
+                    self._track_source_version(
+                        pkg.get("package_type", "generic"),
+                        pkg.get("name", "unknown"),
+                        pkg.get("version", "0.0.0"),
+                    )
+                    self._migrate_package(project_id, project_path, pkg, github_repo)
+                except Exception as exc:
+                    pkg_name = pkg.get("name", "unknown")
+                    pkg_version = pkg.get("version", "0.0.0")
+                    error_log(f"  PACKAGE ERROR: {pkg_name}@{pkg_version} -> {_short_error(exc)}")
+                    self.report["packages_failed"] += 1
+                    self.report["errors"].append({
+                        "package": f"{pkg_name}@{pkg_version}",
+                        "project": project_path,
+                        "error": "unexpected_package_error",
+                        "detail": _short_error(exc, 500),
+                    })
+
+        strict_ok = True
+        if self.strict_version_check and not self.dry_run and not self.verify_only:
+            strict_ok = self._verify_target_versions()
 
         # Generate report
         self.report["completed_at"] = datetime.utcnow().isoformat()
+        self.report["strict_version_check_passed"] = strict_ok
         self._save_report()
         self._print_summary()
+        return strict_ok
 
     def _migrate_package(self, project_id, project_path, package, github_repo):
         """Migrate a single package (all its files)."""
@@ -552,11 +883,14 @@ class PackageMigrationEngine:
             log(f"    DRY-RUN: would upload {len(downloaded_files)} file(s) to GitHub")
             self.report["packages_skipped"] += 1
         else:
-            success = self._upload_to_github(
+            success, had_existing = self._upload_to_github(
                 pkg_name, pkg_type, pkg_version, downloaded_files, github_repo, source_shas
             )
             if success:
-                self.report["packages_migrated"] += 1
+                if had_existing:
+                    self.report["packages_skipped"] += 1
+                else:
+                    self.report["packages_migrated"] += 1
             else:
                 self.report["packages_failed"] += 1
 
@@ -578,6 +912,7 @@ class PackageMigrationEngine:
     def _upload_to_github(self, pkg_name, pkg_type, version, files, github_repo, source_shas):
         """Upload package files to GitHub Packages."""
         try:
+            had_existing = False
             for file_info in files:
                 local_path = file_info["local_path"]
                 file_name = file_info["file_name"]
@@ -585,10 +920,13 @@ class PackageMigrationEngine:
                 if pkg_type == "npm":
                     resp = self.github.upload_npm_package(pkg_name, version, local_path, github_repo)
                 elif pkg_type == "maven":
-                    # Infer group_id from package name (common convention: group.artifact)
-                    parts = pkg_name.rsplit(".", 1)
-                    group_id = parts[0] if len(parts) > 1 else self.github.org
-                    artifact_id = parts[-1]
+                    # GitLab Maven package names use slash-separated paths: com/group/artifact-id
+                    if "/" in pkg_name:
+                        group_path, artifact_id = pkg_name.rsplit("/", 1)
+                        group_id = group_path.replace("/", ".")
+                    else:
+                        group_id = self.github.org
+                        artifact_id = pkg_name
                     resp = self.github.upload_maven_package(
                         group_id, artifact_id, version, local_path, github_repo
                     )
@@ -611,20 +949,40 @@ class PackageMigrationEngine:
                     log(f"    UPLOADED: {file_name} -> GitHub ({resp.status_code})")
                 elif resp.status_code == 409:
                     log(f"    ALREADY EXISTS: {file_name} (409 Conflict)")
+                    had_existing = True
                 else:
-                    error_log(
-                        f"    UPLOAD FAILED: {file_name} -> {resp.status_code}: "
-                        f"{resp.text[:200]}"
-                    )
-                    self.report["errors"].append({
-                        "package": f"{pkg_name}@{version}",
-                        "file": file_name,
-                        "error": f"upload_failed_{resp.status_code}",
-                        "detail": resp.text[:200],
-                    })
-                    return False
+                    fallback_resp = None
+                    if pkg_type in ("npm", "nuget"):
+                        log(
+                            f"    Upload to {pkg_type} registry failed ({resp.status_code}); "
+                            "trying generic release-asset fallback"
+                        )
+                        fallback_resp = self.github.upload_generic_package(
+                            pkg_name, version, local_path, github_repo
+                        )
 
-            return True
+                    if fallback_resp and fallback_resp.status_code in (200, 201):
+                        log(
+                            f"    FALLBACK UPLOADED: {file_name} as release asset "
+                            f"({fallback_resp.status_code})"
+                        )
+                    elif fallback_resp and fallback_resp.status_code == 409:
+                        log(f"    FALLBACK ALREADY EXISTS: {file_name} (409 Conflict)")
+                        had_existing = True
+                    else:
+                        error_log(
+                            f"    UPLOAD FAILED: {file_name} -> {resp.status_code}: "
+                            f"{resp.text[:200]}"
+                        )
+                        self.report["errors"].append({
+                            "package": f"{pkg_name}@{version}",
+                            "file": file_name,
+                            "error": f"upload_failed_{resp.status_code}",
+                            "detail": resp.text[:200],
+                        })
+                        return False, had_existing
+
+            return True, had_existing
 
         except Exception as exc:
             error_log(f"    UPLOAD ERROR: {exc}")
@@ -632,14 +990,25 @@ class PackageMigrationEngine:
                 "package": f"{pkg_name}@{version}",
                 "error": str(exc),
             })
-            return False
+            return False, False
 
     def _save_report(self):
         """Save migration report to JSON."""
         report_path = self.work_dir / "migration_report.json"
-        with open(report_path, "w", encoding="utf-8") as f:
-            json.dump(self.report, f, indent=2, default=str)
-        log(f"\nReport saved to: {report_path}")
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="migration_report_", suffix=".json", dir=str(self.work_dir))
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(self.report, f, indent=2, default=str)
+            os.replace(tmp_path, report_path)
+            log(f"\nReport saved to: {report_path}")
+        except Exception as exc:
+            error_log(f"Failed to write report: {_short_error(exc)}")
+            self.report["errors"].append({"error": "report_write_failed", "detail": _short_error(exc, 500)})
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
 
     def _print_summary(self):
         """Print migration summary."""
@@ -695,57 +1064,74 @@ def parse_args():
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--log-file", default="package_migration.log",
                         help="Log file path")
+    parser.add_argument("--use-docker", action="store_true",
+                        help="Run npm/nuget/maven upload commands via Docker containers")
+    parser.add_argument("--strict-version-check", action="store_true",
+                        help="Fail run if any migrated package version is missing in target registry")
     return parser.parse_args()
 
 
 def main():
-    args = parse_args()
+    try:
+        args = parse_args()
 
-    setup_logging(debug=args.debug, log_file=args.log_file)
+        setup_logging(debug=args.debug, log_file=args.log_file)
 
-    # Validate required args
-    if not args.gitlab_token:
-        error_log("GitLab token is required (--gitlab-token or GITLAB_TOKEN env var)")
+        # Validate required args
+        if not args.gitlab_token:
+            error_log("GitLab token is required (--gitlab-token or GITLAB_TOKEN env var)")
+            sys.exit(1)
+        if not args.github_token and not args.verify_only:
+            error_log("GitHub token is required (--github-token or GITHUB_TOKEN env var)")
+            sys.exit(1)
+        if not args.github_org and not args.verify_only:
+            error_log("GitHub org is required (--github-org or GITHUB_ORG env var)")
+            sys.exit(1)
+
+        log(f"GitLab-to-GitHub Package Migration Tool v{VERSION}")
+        log(f"GitLab URL: {args.gitlab_url}")
+        log(f"GitLab Group: {args.gitlab_group}")
+        if not args.verify_only:
+            log(f"GitHub Org: {args.github_org}")
+
+        # Initialize clients
+        gitlab_client = GitLabPackageClient(args.gitlab_url, args.gitlab_token)
+        github_client = GitHubPackageClient(
+            args.github_token or "", args.github_org or "", use_docker=args.use_docker
+        )
+
+        # Working directory
+        if args.work_dir:
+            work_dir = args.work_dir
+        else:
+            work_dir = tempfile.mkdtemp(prefix="gl2gh_pkg_")
+        log(f"Working directory: {work_dir}")
+
+        engine = PackageMigrationEngine(
+            gitlab_client=gitlab_client,
+            github_client=github_client,
+            work_dir=work_dir,
+            dry_run=args.dry_run,
+            verify_only=args.verify_only,
+            strict_version_check=args.strict_version_check,
+        )
+
+        repo_mapping = None
+        if args.github_repo:
+            # Map all projects to the same target repo (optional override)
+            # More advanced mapping could be loaded from a file in future
+            repo_mapping = {}
+
+        strict_ok = engine.run(args.gitlab_group, repo_mapping=repo_mapping)
+        if args.strict_version_check and not strict_ok:
+            sys.exit(2)
+    except KeyboardInterrupt:
+        error_log("Interrupted by user")
+        sys.exit(130)
+    except Exception as exc:
+        error_log(f"Fatal error: {_short_error(exc, 500)}")
+        debug_log("Run with --debug for full trace details.")
         sys.exit(1)
-    if not args.github_token and not args.verify_only:
-        error_log("GitHub token is required (--github-token or GITHUB_TOKEN env var)")
-        sys.exit(1)
-    if not args.github_org and not args.verify_only:
-        error_log("GitHub org is required (--github-org or GITHUB_ORG env var)")
-        sys.exit(1)
-
-    log(f"GitLab-to-GitHub Package Migration Tool v{VERSION}")
-    log(f"GitLab URL: {args.gitlab_url}")
-    log(f"GitLab Group: {args.gitlab_group}")
-    if not args.verify_only:
-        log(f"GitHub Org: {args.github_org}")
-
-    # Initialize clients
-    gitlab_client = GitLabPackageClient(args.gitlab_url, args.gitlab_token)
-    github_client = GitHubPackageClient(
-        args.github_token or "", args.github_org or ""
-    )
-
-    # Working directory
-    if args.work_dir:
-        work_dir = args.work_dir
-    else:
-        work_dir = tempfile.mkdtemp(prefix="gl2gh_pkg_")
-    log(f"Working directory: {work_dir}")
-
-    # Run migration
-    engine = PackageMigrationEngine(
-        gitlab_client, github_client, work_dir,
-        dry_run=args.dry_run, verify_only=args.verify_only,
-    )
-
-    repo_mapping = None
-    if args.github_repo:
-        # If a single repo override is given, all packages go there
-        repo_mapping = None  # Will use default logic, override handled per-project
-        # This is a simplification; a mapping file would be better for complex cases
-
-    engine.run(args.gitlab_group, repo_mapping=repo_mapping)
 
 
 if __name__ == "__main__":

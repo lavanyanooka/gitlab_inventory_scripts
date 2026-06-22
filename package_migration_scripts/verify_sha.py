@@ -604,10 +604,14 @@ class SHAVerificationEngine:
 
     def _get_maven_sha(self, pkg_name, version, file_name, github_repo):
         """Download Maven artifact from GitHub and compute SHA."""
-        parts = pkg_name.rsplit(".", 1)
-        group_id = parts[0] if len(parts) > 1 else self.github.org
-        artifact_id = parts[-1]
-        group_path = group_id.replace(".", "/")
+        # GitLab Maven package names use slash-separated paths: com/group/artifact-id
+        if "/" in pkg_name:
+            group_path, artifact_id = pkg_name.rsplit("/", 1)
+            group_id = group_path.replace("/", ".")
+        else:
+            group_id = self.github.org
+            artifact_id = pkg_name
+            group_path = group_id.replace(".", "/")
 
         url = (
             f"https://maven.pkg.github.com/{self.github.org}/{github_repo}"

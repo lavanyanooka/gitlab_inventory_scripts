@@ -96,6 +96,12 @@ def error_log(msg):
     _logger.error(msg)
 
 
+def _short_error(exc, limit=200):
+    """Return a concise error string for logs/reports."""
+    text = str(exc).strip().replace("\n", " ")
+    return text[:limit]
+
+
 # ---------------------------------------------------------------------------
 # .env autoload
 # ---------------------------------------------------------------------------
@@ -174,7 +180,12 @@ class GitLabRegistryClient:
             if resp.status_code == 404:
                 return results
             resp.raise_for_status()
-            items = resp.json()
+            try:
+                items = resp.json()
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Invalid JSON from GitLab for {path} page {page}: {_short_error(exc)}"
+                ) from exc
             if not items:
                 break
             results.extend(items)
@@ -211,7 +222,10 @@ class GitLabRegistryClient:
             f"/projects/{project_id}/registry/repositories/{repository_id}/tags/{quote(tag_name, safe='')}"
         )
         if resp.status_code == 200:
-            return resp.json()
+            try:
+                return resp.json()
+            except ValueError:
+                return None
         return None
 
 
@@ -230,6 +244,57 @@ class ContainerCopier:
         self.github_org = github_org
         self.gitlab_registry = gitlab_registry
         self.ghcr = ghcr
+        self._crane_logged_in = False
+
+    def _run_with_retries(self, cmd, timeout=600, retries=2):
+        """Run a subprocess command with retry for transient failures."""
+        last_result = None
+        for attempt in range(retries + 1):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+                if result.returncode == 0:
+                    return True, result.stdout, result.stderr
+                last_result = result
+                if attempt < retries:
+                    wait = 2 ** attempt
+                    debug_log(
+                        f"Command failed (attempt {attempt + 1}/{retries + 1}), retrying in {wait}s: {' '.join(cmd[:3])}"
+                    )
+                    time.sleep(wait)
+            except subprocess.TimeoutExpired:
+                if attempt >= retries:
+                    return False, "", f"Command timed out after {timeout}s"
+                time.sleep(2 ** attempt)
+            except FileNotFoundError:
+                return False, "", f"{self.tool} not found in PATH"
+
+        stderr = last_result.stderr if last_result else "command_failed"
+        stdout = last_result.stdout if last_result else ""
+        return False, stdout, stderr
+
+    def _ensure_crane_login(self):
+        """Authenticate crane to both source and destination registries once."""
+        if self.tool != "crane" or self._crane_logged_in:
+            return True, ""
+
+        login_gl = subprocess.run(
+            ["crane", "auth", "login", self.gitlab_registry,
+             "-u", "oauth2", "-p", self.gitlab_token],
+            capture_output=True, text=True, timeout=30,
+        )
+        if login_gl.returncode != 0:
+            return False, f"Crane GitLab login failed: {login_gl.stderr.strip()}"
+
+        login_gh = subprocess.run(
+            ["crane", "auth", "login", self.ghcr,
+             "-u", self.github_org, "-p", self.github_token],
+            capture_output=True, text=True, timeout=30,
+        )
+        if login_gh.returncode != 0:
+            return False, f"Crane GHCR login failed: {login_gh.stderr.strip()}"
+
+        self._crane_logged_in = True
+        return True, ""
 
     def copy_image(self, source_image, dest_image):
         """
@@ -247,6 +312,9 @@ class ContainerCopier:
                 src, dst,
             ]
         elif self.tool == "crane":
+            ok, err = self._ensure_crane_login()
+            if not ok:
+                return False, "", err
             # crane requires separate login; use copy command
             cmd = ["crane", "copy", source_image, dest_image]
         elif self.tool in ("docker", "podman"):
@@ -255,15 +323,7 @@ class ContainerCopier:
         else:
             return False, "", f"Unsupported tool: {self.tool}"
 
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=600
-            )
-            return result.returncode == 0, result.stdout, result.stderr
-        except subprocess.TimeoutExpired:
-            return False, "", "Command timed out after 600s"
-        except FileNotFoundError:
-            return False, "", f"{self.tool} not found in PATH"
+        return self._run_with_retries(cmd, timeout=600, retries=2)
 
     def _docker_copy(self, source_image, dest_image):
         """Docker/podman pull-tag-push workflow."""
@@ -352,6 +412,9 @@ class ContainerCopier:
                 pass
 
         elif self.tool == "crane":
+            ok, _ = self._ensure_crane_login()
+            if not ok:
+                return None
             cmd = ["crane", "digest", image_ref]
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
@@ -370,12 +433,15 @@ class ContainerCopier:
 class ContainerMigrationEngine:
     """Orchestrates container image migration from GitLab to GHCR."""
 
-    def __init__(self, gitlab_client, copier, github_org, dry_run=False, verify=False):
+    def __init__(self, gitlab_client, copier, github_org, dry_run=False, verify=False,
+                 strict_tag_check=False):
         self.gitlab = gitlab_client
         self.copier = copier
         self.github_org = github_org
         self.dry_run = dry_run
         self.verify = verify
+        self.strict_tag_check = strict_tag_check
+        self._source_tags = {}  # {dest_image_base: set(tags)}
 
         self.report = {
             "started_at": datetime.utcnow().isoformat(),
@@ -391,13 +457,27 @@ class ContainerMigrationEngine:
             "mismatches": [],
             "errors": [],
             "details": [],
+            "tag_verification": {
+                "enabled": strict_tag_check,
+                "checked": 0,
+                "missing_tags": [],
+            },
         }
 
     def run_from_group(self, group_path):
         """Discover and migrate all container images in a GitLab group."""
         log(f"Discovering container images in group: {group_path}")
 
-        projects = self.gitlab.get_group_projects(group_path)
+        try:
+            projects = self.gitlab.get_group_projects(group_path)
+        except Exception as exc:
+            error_log(f"Failed to list projects for group {group_path}: {_short_error(exc)}")
+            self.report["errors"].append({
+                "source": group_path,
+                "error": f"group_list_failed: {_short_error(exc, 500)}",
+            })
+            self._finalize()
+            return
         log(f"Found {len(projects)} projects")
 
         for project in projects:
@@ -414,7 +494,11 @@ class ContainerMigrationEngine:
             sys.exit(1)
 
         log(f"Loading inventory from: {inventory_path}")
-        wb = openpyxl.load_workbook(inventory_path, read_only=True)
+        try:
+            wb = openpyxl.load_workbook(inventory_path, read_only=True)
+        except Exception as exc:
+            error_log(f"Failed to load inventory file: {_short_error(exc)}")
+            return
 
         # Look for Container Registry sheet
         sheet_name = None
@@ -464,7 +548,12 @@ class ContainerMigrationEngine:
         project_path = project.get("path_with_namespace", "")
         project_name = project.get("path", project_path.split("/")[-1])
 
-        repositories = self.gitlab.get_repositories(project_id)
+        try:
+            repositories = self.gitlab.get_repositories(project_id)
+        except Exception as e:
+            log(f"  SKIPPED {project_path}: cannot access container registry ({e})")
+            self.report.setdefault("skipped_projects", []).append({"project": project_path, "reason": str(e)})
+            return
         if not repositories:
             debug_log(f"  No container repositories in {project_path}")
             return
@@ -480,7 +569,15 @@ class ContainerMigrationEngine:
 
             log(f"  Repository: {repo_path} ({tag_count} tags)")
 
-            tags = self.gitlab.get_repository_tags(project_id, repo_id)
+            try:
+                tags = self.gitlab.get_repository_tags(project_id, repo_id)
+            except Exception as exc:
+                error_log(f"  FAILED listing tags for {repo_path}: {_short_error(exc)}")
+                self.report["errors"].append({
+                    "source": repo_location,
+                    "error": f"tag_list_failed: {_short_error(exc, 500)}",
+                })
+                continue
             if not tags:
                 continue
 
@@ -499,14 +596,23 @@ class ContainerMigrationEngine:
         # Source: registry.gitlab.com/group/project:tag
         source_image = f"{repo_location}:{tag_name}"
 
+        # Track source tags for strict verification
+        dest_repo_name = project_path.replace("/", "-").lower()
+        dest_base = f"{DEFAULT_GHCR}/{self.github_org}/{dest_repo_name}"
+        self._source_tags.setdefault(dest_base, set()).add(tag_name)
+
         # Destination: ghcr.io/github-org/project-name:tag
         # Flatten the path for GHCR (replace / with -)
         dest_repo_name = project_path.replace("/", "-").lower()
         dest_image = f"{DEFAULT_GHCR}/{self.github_org}/{dest_repo_name}:{tag_name}"
 
         # Get source digest from GitLab API
-        tag_detail = self.gitlab.get_tag_detail(project_id, repo_id, tag_name)
-        source_digest = tag_detail.get("digest", "") if tag_detail else ""
+        try:
+            tag_detail = self.gitlab.get_tag_detail(project_id, repo_id, tag_name)
+            source_digest = tag_detail.get("digest", "") if tag_detail else ""
+        except Exception as exc:
+            debug_log(f"    Could not fetch source digest for {source_image}: {_short_error(exc)}")
+            source_digest = ""
 
         detail = {
             "source": source_image,
@@ -520,6 +626,33 @@ class ContainerMigrationEngine:
             log(f"    [DRY-RUN] {source_image} -> {dest_image}")
             detail["status"] = "dry-run"
             self.report["tags_skipped"] += 1
+            self.report["details"].append(detail)
+            return
+
+        # Skip migration when destination tag already exists.
+        existing_dest_digest = self.copier.inspect_digest(dest_image)
+        if existing_dest_digest:
+            log(f"    SKIPPED (already exists): {dest_image}")
+            detail["status"] = "already-exists"
+            detail["dest_digest"] = existing_dest_digest
+            self.report["tags_skipped"] += 1
+
+            if self.verify and source_digest:
+                if existing_dest_digest == source_digest:
+                    log(f"    Existing digest MATCH: {source_digest[:24]}...")
+                    self.report["digest_matches"] += 1
+                else:
+                    log("    Existing digest MISMATCH!")
+                    log(f"      Source: {source_digest}")
+                    log(f"      Dest:   {existing_dest_digest}")
+                    self.report["digest_mismatches"] += 1
+                    self.report["mismatches"].append({
+                        "source_image": source_image,
+                        "dest_image": dest_image,
+                        "source_digest": source_digest,
+                        "dest_digest": existing_dest_digest,
+                    })
+
             self.report["details"].append(detail)
             return
 
@@ -566,15 +699,59 @@ class ContainerMigrationEngine:
 
         self.report["details"].append(detail)
 
+    def _verify_target_tags(self):
+        """Verify all source tags exist in destination registry."""
+        missing_tags = []
+        checked = 0
+
+        for dest_base, expected_tags in self._source_tags.items():
+            for tag in sorted(expected_tags):
+                checked += 1
+                dest_ref = f"{dest_base}:{tag}"
+                digest = self.copier.inspect_digest(dest_ref) if self.copier else None
+                if not digest:
+                    missing_tags.append({
+                        "dest_image": dest_ref,
+                        "tag": tag,
+                    })
+
+        self.report["tag_verification"]["checked"] = checked
+        self.report["tag_verification"]["missing_tags"] = missing_tags
+
+        if missing_tags:
+            log("\nSTRICT TAG CHECK FAILED: missing destination tags detected")
+            for item in missing_tags:
+                log(f"  Missing: {item['dest_image']}")
+        else:
+            log(f"\nStrict tag check PASSED: all {checked} tags verified in destination")
+
+        return len(missing_tags) == 0
+
     def _finalize(self):
         """Save report and print summary."""
+        strict_ok = True
+        if self.strict_tag_check and not self.dry_run and self.copier:
+            strict_ok = self._verify_target_tags()
+        self.report["strict_tag_check_passed"] = strict_ok
+
         self.report["completed_at"] = datetime.utcnow().isoformat()
 
         # Save report
         report_path = Path("container_migration_report.json")
-        with open(report_path, "w", encoding="utf-8") as f:
-            json.dump(self.report, f, indent=2, default=str)
-        log(f"\nReport saved to: {report_path}")
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="container_report_", suffix=".json", dir=str(report_path.parent))
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(self.report, f, indent=2, default=str)
+            os.replace(tmp_path, report_path)
+            log(f"\nReport saved to: {report_path}")
+        except Exception as exc:
+            error_log(f"Failed to write report: {_short_error(exc)}")
+            self.report["errors"].append({"source": "report", "error": f"report_write_failed: {_short_error(exc, 500)}"})
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
 
         # Summary
         r = self.report
@@ -636,7 +813,11 @@ def parse_args():
                         help="Verify digests after migration")
     parser.add_argument("--tool", choices=["skopeo", "crane", "docker", "podman"],
                         default=None, help="Force a specific copy tool")
+    parser.add_argument("--use-docker", action="store_true",
+                        help="Force Docker as the container copy tool")
 
+    parser.add_argument("--strict-tag-check", action="store_true",
+                        help="Fail run if any source tag is missing in destination registry")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--log-file", default="container_migration.log")
 
@@ -644,62 +825,74 @@ def parse_args():
 
 
 def main():
-    args = parse_args()
-    setup_logging(debug=args.debug, log_file=args.log_file)
+    try:
+        args = parse_args()
+        setup_logging(debug=args.debug, log_file=args.log_file)
 
-    log(f"GitLab-to-GHCR Container Migration Tool v{VERSION}")
+        log(f"GitLab-to-GHCR Container Migration Tool v{VERSION}")
 
-    # Validate
-    if not args.gitlab_token:
-        error_log("GitLab token required (--gitlab-token or GITLAB_TOKEN)")
-        sys.exit(1)
-    if not args.github_token and not args.dry_run:
-        error_log("GitHub token required (--github-token or GITHUB_TOKEN)")
-        sys.exit(1)
-    if not args.github_org:
-        error_log("GitHub org required (--github-org or GITHUB_ORG)")
-        sys.exit(1)
-    if not args.gitlab_group and not args.inventory:
-        error_log("Specify either --gitlab-group or --inventory")
-        sys.exit(1)
+        # Validate
+        if not args.gitlab_token:
+            error_log("GitLab token required (--gitlab-token or GITLAB_TOKEN)")
+            sys.exit(1)
+        if not args.github_token and not args.dry_run:
+            error_log("GitHub token required (--github-token or GITHUB_TOKEN)")
+            sys.exit(1)
+        if not args.github_org:
+            error_log("GitHub org required (--github-org or GITHUB_ORG)")
+            sys.exit(1)
+        if not args.gitlab_group and not args.inventory:
+            error_log("Specify either --gitlab-group or --inventory")
+            sys.exit(1)
 
-    # Detect copy tool
-    tool = args.tool or find_copy_tool()
-    if not tool and not args.dry_run:
-        error_log(
-            "No container copy tool found. Install one of: skopeo, crane, docker, podman"
-        )
-        sys.exit(1)
+        # Detect copy tool
+        tool = "docker" if args.use_docker else (args.tool or find_copy_tool())
+        if not tool and not args.dry_run:
+            error_log(
+                "No container copy tool found. Install one of: skopeo, crane, docker, podman"
+            )
+            sys.exit(1)
 
-    if tool:
-        log(f"Using copy tool: {tool}")
-    else:
-        log("No copy tool available (dry-run mode, not needed)")
+        if tool:
+            log(f"Using copy tool: {tool}")
+        else:
+            log("No copy tool available (dry-run mode, not needed)")
 
-    # Initialize
-    gitlab_client = GitLabRegistryClient(args.gitlab_url, args.gitlab_token)
+        # Initialize
+        gitlab_client = GitLabRegistryClient(args.gitlab_url, args.gitlab_token)
 
-    copier = None
-    if tool:
-        copier = ContainerCopier(
-            tool=tool,
-            gitlab_token=args.gitlab_token,
-            github_token=args.github_token or "",
+        copier = None
+        if tool:
+            copier = ContainerCopier(
+                tool=tool,
+                gitlab_token=args.gitlab_token,
+                github_token=args.github_token or "",
+                github_org=args.github_org,
+            )
+
+        engine = ContainerMigrationEngine(
+            gitlab_client=gitlab_client,
+            copier=copier,
             github_org=args.github_org,
+            dry_run=args.dry_run,
+            verify=args.verify,
+            strict_tag_check=args.strict_tag_check,
         )
 
-    engine = ContainerMigrationEngine(
-        gitlab_client=gitlab_client,
-        copier=copier,
-        github_org=args.github_org,
-        dry_run=args.dry_run,
-        verify=args.verify,
-    )
+        if args.inventory:
+            engine.run_from_inventory(args.inventory)
+        else:
+            engine.run_from_group(args.gitlab_group)
 
-    if args.inventory:
-        engine.run_from_inventory(args.inventory)
-    else:
-        engine.run_from_group(args.gitlab_group)
+        if args.strict_tag_check and not engine.report.get("strict_tag_check_passed", True):
+            sys.exit(2)
+    except KeyboardInterrupt:
+        error_log("Interrupted by user")
+        sys.exit(130)
+    except Exception as exc:
+        error_log(f"Fatal error: {_short_error(exc, 500)}")
+        debug_log("Run with --debug for full trace details.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
