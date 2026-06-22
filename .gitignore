@@ -29,6 +29,7 @@ container_migration_report.json
 package_migration_scripts/inventory/*.xlsx
 package_migration_scripts/logs/
 package_migration_scripts/reports/
+users_permissions_scripts/*.xlsx
 
 # IDE
 .vscode/

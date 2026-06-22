@@ -1,0 +1,4 @@
+﻿gitlab_group_id,gitlab_group_path,depth,parent_group_path,github_org,github_team_slug,github_team_parent,notes
+133483523,ranjiths-infomagnus-group,0,,im-sandbox-rushik,ranjiths-infomagnus-group,,
+135517835,ranjiths-infomagnus-group/backend,1,ranjiths-infomagnus-group,im-sandbox-rushik,backend,ranjiths-infomagnus-group,
+135517832,ranjiths-infomagnus-group/frontend,1,ranjiths-infomagnus-group,im-sandbox-rushik,frontend,ranjiths-infomagnus-group,

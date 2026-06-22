@@ -1,0 +1,9 @@
+﻿gitlab_project_id,gitlab_project_path,visibility,archived,github_org,github_repo_name,github_visibility,notes
+83646103,ranjiths-infomagnus-group/backend/api-service,private,False,im-sandbox-rushik,api-service,private,
+83044636,ranjiths-infomagnus-group/dummy_aws_project,private,False,im-sandbox-rushik,dummy_aws_project,private,
+83646100,ranjiths-infomagnus-group/frontend/web-app,private,False,im-sandbox-rushik,web-app,private,
+83008107,ranjiths-infomagnus-group/gitlab-game-demo,private,False,im-sandbox-rushik,gitlab-game-demo,private,
+82751815,ranjiths-infomagnus-group/ranjith_demo,private,False,im-sandbox-rushik,ranjith_demo,private,
+82751829,ranjiths-infomagnus-group/ranjith_demo2,private,False,im-sandbox-rushik,ranjith_demo2,private,
+82744757,ranjiths-infomagnus-group/ranjiths-infomagnus-project,private,False,im-sandbox-rushik,ranjiths-infomagnus-project,private,
+83646107,ranjiths-infomagnus-group/shared-lib,private,False,im-sandbox-rushik,shared-lib,private,
