@@ -335,6 +335,9 @@ class PermissionMigrator:
         self.teams_created: list[str] = []
         self.teams_updated: list[str] = []
         self.teams_skipped: list[str] = []
+        self.org_members_existing: list[str] = []
+        self.org_members_invited: list[str] = []
+        self.org_members_failed: list[str] = []
         self.members_added: list[str] = []
         self.members_updated: list[str] = []
         self.members_skipped: list[str] = []
@@ -343,6 +346,66 @@ class PermissionMigrator:
         self.repo_perms_updated: list[str] = []
         self.repo_perms_skipped: list[str] = []
         self.repo_perms_failed: list[str] = []
+
+    # ------------------------------------------------------------------
+    # Org membership (pre-check)
+    # ------------------------------------------------------------------
+
+    def ensure_org_membership(self) -> None:
+        """Ensure all mapped users are org members. Invite if not."""
+        log.info("Checking org membership for %d mapped users in '%s'...",
+                 len(self.user_map), self.org)
+
+        for um in self.user_map.values():
+            gh_user = um.github_username
+
+            # Check current membership status
+            resp = self.client.get(f"orgs/{self.org}/members/{gh_user}")
+            if resp and resp.status_code == 204:
+                # 204 = user is an active member
+                log.debug("User '%s' is already an org member, skipping", gh_user)
+                self.org_members_existing.append(gh_user)
+                continue
+
+            # Check if there's a pending invitation already
+            resp_pending = self.client.get(
+                f"orgs/{self.org}/invitations",
+                params={"per_page": 100},
+            )
+            already_invited = False
+            if resp_pending and resp_pending.status_code == 200:
+                for inv in resp_pending.json():
+                    if inv.get("login", "").lower() == gh_user.lower():
+                        log.debug("User '%s' already has pending invitation, skipping", gh_user)
+                        self.org_members_existing.append(f"{gh_user} (pending)")
+                        already_invited = True
+                        break
+            if already_invited:
+                continue
+
+            # Add user to org via memberships API (invites if not already a member)
+            invite_resp = self.client.put(
+                f"orgs/{self.org}/memberships/{gh_user}",
+                json={"role": "member"},
+            )
+            if invite_resp is None and self.client.dry_run:
+                self.org_members_invited.append(gh_user)
+            elif invite_resp and invite_resp.status_code in (200, 201):
+                state = invite_resp.json().get("state", "unknown")
+                if state == "active":
+                    log.info("User '%s' added to org (already had account)", gh_user)
+                else:
+                    log.info("User '%s' invited to org (state: %s)", gh_user, state)
+                self.org_members_invited.append(f"{gh_user} ({state})")
+            else:
+                status = invite_resp.status_code if invite_resp else "N/A"
+                body = invite_resp.text[:200] if invite_resp else ""
+                log.warning("Failed to invite '%s' to org: %s %s", gh_user, status, body)
+                self.org_members_failed.append(gh_user)
+
+        log.info("Org membership — existing: %d, invited: %d, failed: %d",
+                 len(self.org_members_existing), len(self.org_members_invited),
+                 len(self.org_members_failed))
 
     # ------------------------------------------------------------------
     # Teams
@@ -630,6 +693,9 @@ class PermissionMigrator:
         print(f"\n{separator}")
         print("  GitHub Permission Migration Summary")
         print(separator)
+        print(f"  Org members existing:  {len(self.org_members_existing):>6}")
+        print(f"  Org members invited:   {len(self.org_members_invited):>6}")
+        print(f"  Org members failed:    {len(self.org_members_failed):>6}")
         print(f"  Teams created:         {len(self.teams_created):>6}")
         print(f"  Teams updated:         {len(self.teams_updated):>6}")
         print(f"  Teams skipped:         {len(self.teams_skipped):>6}")
@@ -642,6 +708,11 @@ class PermissionMigrator:
         print(f"  Repo perms skipped:    {len(self.repo_perms_skipped):>6}")
         print(f"  Repo perms failed:     {len(self.repo_perms_failed):>6}")
         print(separator)
+
+        if self.org_members_failed:
+            print("\n  Failed org invitations:")
+            for item in self.org_members_failed[:20]:
+                print(f"    - {item}")
 
         if self.teams_updated:
             print("\n  Updated teams (mismatch fixed):")
@@ -703,6 +774,8 @@ Workflow:
                         help="Path to inventory Excel (default: in mappings-dir)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Simulate all actions without making changes")
+    parser.add_argument("--skip-org-invite", action="store_true",
+                        help="Skip org membership check/invite step")
     parser.add_argument("--skip-teams", action="store_true",
                         help="Skip team creation step")
     parser.add_argument("--skip-members", action="store_true",
@@ -760,6 +833,9 @@ def main() -> None:
 
     # Execute migration steps
     start_time = time.time()
+
+    if not args.skip_org_invite:
+        migrator.ensure_org_membership()
 
     if not args.skip_teams:
         migrator.create_teams()
