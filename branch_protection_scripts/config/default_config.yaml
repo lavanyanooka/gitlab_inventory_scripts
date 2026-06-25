@@ -1,0 +1,70 @@
+# Branch Protection Migration Configuration
+# -------------------------------------------
+
+gitlab:
+  url: "https://gitlab.com"
+  # token: set via GITLAB_TOKEN env var or --gitlab-token CLI arg
+  per_page: 100
+
+github:
+  api_url: "https://api.github.com"
+  # token: set via GITHUB_TOKEN env var or --github-token CLI arg
+  org: ""
+
+migration:
+  dry_run: false
+  skip_existing: false
+  parallel_workers: 4
+  batch_size: 50
+  retry:
+    max_retries: 3
+    backoff_factor: 2
+    retry_on_status: [429, 500, 502, 503, 504]
+
+  # Include/exclude filters (regex patterns)
+  include_repos: []
+  exclude_repos: []
+  include_branches: []
+  exclude_branches: []
+
+mapping:
+  # Default role mapping: GitLab access level -> GitHub permission
+  push_access:
+    # GitLab: 0=No one, 30=Developer, 40=Maintainer, 60=Admin
+    0: "restrict"       # No one can push
+    30: "maintain"      # Developers -> maintain
+    40: "admin"         # Maintainers -> admin
+    60: "admin"         # Admins -> admin
+
+  merge_access:
+    0: "restrict"
+    30: "maintain"
+    40: "admin"
+    60: "admin"
+
+  # Default settings when GitLab doesn't have an equivalent
+  defaults:
+    require_pull_request: true
+    required_approving_reviews: 1
+    dismiss_stale_reviews: true
+    require_code_owner_reviews: false
+    required_status_checks: []
+    strict_status_checks: false
+    enforce_admins: false
+    require_linear_history: false
+    require_signed_commits: false
+    allow_force_pushes: false
+    allow_deletions: false
+
+validation:
+  enabled: true
+  fail_on_mismatch: false
+
+reporting:
+  output_dir: "reports"
+  formats: ["json", "csv", "markdown"]
+
+logging:
+  level: "INFO"
+  file: "logs/branch_protection_migration.log"
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

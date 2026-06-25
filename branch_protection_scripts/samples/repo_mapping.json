@@ -1,0 +1,17 @@
+[
+  {
+    "gitlab_project_id": 12345678,
+    "github_owner": "my-github-org",
+    "github_repo": "web-frontend"
+  },
+  {
+    "gitlab_project_id": 12345679,
+    "github_owner": "my-github-org",
+    "github_repo": "api-service"
+  },
+  {
+    "gitlab_project_id": 12345680,
+    "github_owner": "my-github-org",
+    "github_repo": "shared-lib"
+  }
+]

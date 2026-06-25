@@ -1,0 +1,4 @@
+gitlab_project_id,github_owner,github_repo
+12345678,my-github-org,web-frontend
+12345679,my-github-org,api-service
+12345680,my-github-org,shared-lib
