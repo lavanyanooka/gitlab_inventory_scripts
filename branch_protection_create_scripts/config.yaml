@@ -1,0 +1,106 @@
+# Branch Protection Rules Configuration — FULL GitLab API Coverage
+# ==================================================================
+#
+# GitLab Access Levels:
+#   0  = No access (valid for push/merge only, NOT for unprotect)
+#   30 = Developer
+#   40 = Maintainer
+#   60 = Admin (self-managed only)
+#
+# FULL PARAMETER REFERENCE (per rule):
+# ─────────────────────────────────────
+#   name                          (required) Branch name or wildcard (e.g., "main", "release-*")
+#   push_access_level             (int) Simple access level for push. Default: 40
+#   merge_access_level            (int) Simple access level for merge. Default: 40
+#   unprotect_access_level        (int) Simple access level for unprotect. Default: 40. Cannot be 0.
+#   allow_force_push              (bool) Allow force push. Default: false
+#   code_owner_approval_required  (bool) Require CODEOWNERS approval. Default: false (Premium/Ultimate)
+#
+#   --- Premium/Ultimate granular arrays (override the simple *_access_level fields) ---
+#   allowed_to_push:              Array of {access_level: int}, {user_id: int}, {group_id: int}, {deploy_key_id: int}
+#   allowed_to_merge:             Array of {access_level: int}, {user_id: int}, {group_id: int}
+#   allowed_to_unprotect:         Array of {access_level: int}, {user_id: int}, {group_id: int}
+
+rules:
+  - name: "main"
+    push_access_level: 40              # Maintainers only
+    merge_access_level: 40             # Maintainers only
+    unprotect_access_level: 40         # Maintainers only
+    allow_force_push: false
+    code_owner_approval_required: false
+
+  - name: "master"
+    push_access_level: 40
+    merge_access_level: 40
+    unprotect_access_level: 40
+    allow_force_push: false
+    code_owner_approval_required: false
+
+  - name: "develop"
+    push_access_level: 30              # Developers can push
+    merge_access_level: 30             # Developers can merge
+    unprotect_access_level: 40         # Only Maintainers can unprotect
+    allow_force_push: false
+    code_owner_approval_required: false
+
+  - name: "release"
+    push_access_level: 40              # Maintainers only
+    merge_access_level: 40             # Maintainers only
+    unprotect_access_level: 40
+    allow_force_push: false
+    code_owner_approval_required: false
+
+  # Protect all release branches — no direct push
+  # - name: "release-*"
+  #   push_access_level: 0             # No one can push directly
+  #   merge_access_level: 40           # Maintainers merge only
+  #   unprotect_access_level: 40
+  #   allow_force_push: false
+  #   code_owner_approval_required: true
+
+  # Protect develop — developers can push and merge
+  # - name: "develop"
+  #   push_access_level: 30
+  #   merge_access_level: 30
+  #   unprotect_access_level: 40
+  #   allow_force_push: false
+  #   code_owner_approval_required: false
+
+  # Wildcard: protect all hotfix branches
+  # - name: "hotfix-*"
+  #   push_access_level: 40
+  #   merge_access_level: 40
+  #   allow_force_push: false
+
+  # Granular Premium example: specific user + deploy key can push
+  # - name: "deploy-*"
+  #   allowed_to_push:
+  #     - user_id: 42
+  #     - deploy_key_id: 7
+  #   allowed_to_merge:
+  #     - access_level: 40
+  #   allowed_to_unprotect:
+  #     - group_id: 99
+  #   allow_force_push: false
+  #   code_owner_approval_required: true
+
+# Options
+options:
+  # Skip branches that are already protected (don't update/overwrite them)
+  skip_existing: false
+
+  # Update existing protections with the configured rules
+  update_existing: true
+
+  # If false, only protect branches that actually exist in the project
+  # If true, protect regardless (useful for wildcard patterns like "release-*")
+  protect_missing_branches: false
+
+  # Create branches that don't exist (from the project's default branch)
+  create_branches: true
+
+  # Dry run mode (log what would happen without making changes)
+  dry_run: false
+
+  # Number of parallel workers
+  workers: 4
